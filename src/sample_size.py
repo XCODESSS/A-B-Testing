@@ -23,7 +23,6 @@ def calculate_sample_size(
     - alpha: The significance level (commonly set to 0.05).
     - power: The desired power of the test (commonly set to 0.8).
     Returns:
-    - The required sample size per group.
     - The required total sample size.
     Formula: n = (Z_α/2 + Z_β)² * (p1(1-p1) + p2(1-p2)) / (p1-p2)²
     Where:
@@ -88,8 +87,8 @@ def _is_valid_probability(value):
 
 def _compute_treatment_rate(baseline_rate, mde, mde_type):
     if mde_type == MDE_ABSOLUTE:
-        return baseline_rate * (1 + mde)
-    return baseline_rate + mde
+        return baseline_rate + mde
+    return baseline_rate * (1 + mde)
 
 def _combined_variance(control_rate, treatment_rate):
     """Unpooled variance: sum of individual Bernoulli variances."""
@@ -101,3 +100,10 @@ def _required_z_threshold(alpha, power):
     z_alpha = stats.norm.ppf(1 - alpha / 2)
     z_beta = stats.norm.ppf(power)
     return z_alpha + z_beta
+
+print(calculate_sample_size(
+    baseline_rate=0.10,
+    minimum_detectable_effect=0.02,
+    alpha=0.05,
+    power=0.80
+))
