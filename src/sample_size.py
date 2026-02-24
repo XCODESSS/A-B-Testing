@@ -75,10 +75,49 @@ def calculate_sample_size_continuous(
     return math.ceil(per_group)
 
 
-# === Validation — Fail Fast ===
-def _validate_proportion_inputs(
-    baseline_rate, mde, alpha, power, mde_type
+def calculate_power(
+    baseline_rate,
+    minimum_detectable_effect,
+    sample_size_per_group,
+    alpha=DEFAULT_ALPHA,
+    mde_type=MDE_ABSOLUTE,
 ):
+    """
+    Power achieved at a given sample size per group for a two-proportion z-test.
+    Exact inverse of calculate_sample_size_proportion.
+
+    Derivation — rearranging the sample size formula:
+        n    = (Z_α/2 + Z_β)² × σ² / δ²
+        Z_β  = √(n × δ² / σ²) − Z_α/2
+        power = Φ(Z_β)
+
+    Due to ceil() in calculate_sample_size_proportion, passing the returned n
+    back here will yield power slightly above the originally requested power.
+    """
+    _validate_power_inputs(
+        baseline_rate, minimum_detectable_effect, alpha,
+        sample_size_per_group, mde_type,
+    )
+
+    treatment_rate = _compute_treatment_value(
+        baseline_rate, minimum_detectable_effect, mde_type
+    )
+    _validate_treatment_rate(treatment_rate)
+
+    variance = _bernoulli_combined_variance(baseline_rate, treatment_rate)
+    effect_squared = (treatment_rate - baseline_rate) ** 2
+
+    z_alpha = stats.norm.ppf(1 - alpha / 2)
+    z_combined = math.sqrt(sample_size_per_group * effect_squared / variance)
+    z_beta = z_combined - z_alpha
+
+    return float(stats.norm.cdf(z_beta))
+
+
+# === Validation — Fail Fast ===
+
+
+def _validate_proportion_inputs(baseline_rate, mde, alpha, power, mde_type):
     if not _is_valid_probability(baseline_rate):
         raise ValueError(
             f"baseline_rate must be in (0, 1), got {baseline_rate}"
@@ -90,6 +129,30 @@ def _validate_continuous_inputs(std_dev, mde, alpha, power, mde_type):
     if std_dev <= 0:
         raise ValueError(f"std_dev must be positive, got {std_dev}")
     _validate_common_inputs(mde, alpha, power, mde_type)
+
+
+def _validate_power_inputs(
+    baseline_rate, mde, alpha, sample_size_per_group, mde_type
+):
+    if not _is_valid_probability(baseline_rate):
+        raise ValueError(
+            f"baseline_rate must be in (0, 1), got {baseline_rate}"
+        )
+    if mde <= 0:
+        raise ValueError(
+            f"minimum_detectable_effect must be positive, got {mde}"
+        )
+    if not _is_valid_probability(alpha):
+        raise ValueError(f"alpha must be in (0, 1), got {alpha}")
+    if not isinstance(sample_size_per_group, int) or sample_size_per_group < 2:
+        raise ValueError(
+            "sample_size_per_group must be an integer >= 2, "
+            f"got {sample_size_per_group}"
+        )
+    if mde_type not in VALID_MDE_TYPES:
+        raise ValueError(
+            f"mde_type must be one of {VALID_MDE_TYPES}, got '{mde_type}'"
+        )
 
 
 def _validate_common_inputs(mde, alpha, power, mde_type):
@@ -151,6 +214,15 @@ if __name__ == "__main__":
     )
     print(f"Proportion test — per group: {proportion_n}")
     print(f"Proportion test — total:     {proportion_n * 2}")
+
+    recovered_power = calculate_power(
+        baseline_rate=0.10,
+        minimum_detectable_effect=0.02,
+        sample_size_per_group=proportion_n,
+        alpha=0.05,
+    )
+    # Slightly above 0.80 due to ceil() in calculate_sample_size_proportion
+    print(f"Recovered power at n={proportion_n}: {recovered_power:.4f}")
 
     continuous_n = calculate_sample_size_continuous(
         baseline_mean=50.0,
