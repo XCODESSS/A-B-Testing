@@ -260,6 +260,19 @@ def render_sample_size_calculator():
     - Detecting a 2% lift requires ~4x more users than a 4% lift
     - Industry standard: 80% power, 5% significance
     """)
+    with st.expander("📊 Compare Multiple Scenarios"):
+        mde_options = st.multiselect(
+        "Select MDE values",
+        [0.01, 0.02, 0.03, 0.05, 0.10],
+        default=[0.02, 0.05]
+    )
+    
+    if mde_options and test_type == TEST_TYPE_PROPORTION:
+        results = []
+        for m in mde_options:
+            n = calculate_sample_size_proportion(baseline_rate, m, alpha, power, mde_type_key)
+            results.append({"MDE": m, "Per Group": n, "Total": n*2})
+        st.dataframe(results)
 
 
 def render_power_analysis():
