@@ -228,9 +228,7 @@ def _load_csv_input():
 
     if upload is not None:
         return pd.read_csv(upload)
-    if csv_text.strip():
-        return pd.read_csv(io.StringIO(csv_text))
-    return None
+    return pd.read_csv(io.StringIO(csv_text)) if csv_text.strip() else None
 
 
 def _run_numeric_group_test(test_type, df, alpha):
@@ -435,7 +433,7 @@ def render_pvalue_distribution():
         f"**{100 * false_positive_probability:.2f}%** chance of at least one false positive."
     )
 
-    table_tests = np.array(sorted(set([1, 2, 5, 10, 20, 50, 100, int(n_tests)])))
+    table_tests = np.array(sorted({1, 2, 5, 10, 20, 50, 100, int(n_tests)}))
     table_rates = 1 - (1 - alpha) ** table_tests
     table = pd.DataFrame(
         {"Number of tests": table_tests, "At least one false positive": table_rates}

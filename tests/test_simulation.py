@@ -11,6 +11,7 @@ from src.simulation import simulate_pvalue_distribution
 
 
 def test_pvalues_are_bounded_for_all_test_types():
+
     for test_type in ("T-test", "Chi-square", "Mann-Whitney"):
         p_values = simulate_pvalue_distribution(
             n_simulations=200,
