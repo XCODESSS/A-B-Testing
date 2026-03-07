@@ -295,6 +295,27 @@ def _render_pvalue_histogram(p_values, alpha):
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _calculate_family_wise_error_rate(n_tests, alpha=DEFAULT_ALPHA):
+    return 1 - (1 - alpha) ** int(n_tests)
+
+
+def _build_multiple_testing_table(alpha=DEFAULT_ALPHA):
+    test_counts = np.array([1, 5, 10, 20, 50], dtype=int)
+    table = pd.DataFrame(
+        {
+            "Number of tests": test_counts,
+            "Chance of at least one false positive": [
+                _calculate_family_wise_error_rate(n_tests=count, alpha=alpha)
+                for count in test_counts
+            ],
+        }
+    )
+    table["Chance of at least one false positive"] = (
+        100 * table["Chance of at least one false positive"]
+    ).map(lambda value: f"{value:.2f}%")
+    return table
+
+
 def render_sample_size_calculator():
     st.title("A/B Testing Intelligence Platform")
     st.caption("Sample Size Calculator")
@@ -391,15 +412,9 @@ def render_statistical_tests():
 def render_pvalue_distribution():
     st.title("A/B Testing Intelligence Platform")
     st.caption("P-value Distribution")
+    alpha = DEFAULT_ALPHA
+    st.write(f"Reference alpha is fixed at {alpha:.2f}.")
 
-    alpha = st.number_input(
-        "Significance Level (alpha)",
-        min_value=MIN_PROBABILITY,
-        max_value=MAX_PROBABILITY,
-        value=DEFAULT_ALPHA,
-        step=0.001,
-        format="%.3f",
-    )
     n_simulations = st.slider("Number of simulations", min_value=100, max_value=10000, value=1000, step=100)
     sample_size = st.slider("Sample size per group", min_value=50, max_value=5000, value=500, step=50)
     effect_size = st.slider("Effect size", min_value=0.0, max_value=0.5, value=0.0, step=0.01)
@@ -416,7 +431,8 @@ def render_pvalue_distribution():
         _render_pvalue_histogram(p_values, alpha)
 
         significant_rate = float(np.mean(p_values < alpha))
-        st.metric("Percent of p-values < alpha", f"{100 * significant_rate:.2f}%")
+        st.metric("Tests significant at alpha=0.05", f"{100 * significant_rate:.2f}%")
+        st.write(f"{100 * significant_rate:.2f}% of tests were significant.")
 
         if effect_size == 0:
             st.info(
@@ -426,27 +442,20 @@ def render_pvalue_distribution():
             st.info("With real effect, p-values should concentrate near zero.")
 
     st.subheader("Multiple Testing Problem")
+    st.write("Family-wise false positive formula: `1 - (1 - 0.05)^n`")
     n_tests = st.number_input("Number of independent tests", min_value=1, max_value=500, value=20, step=1)
-    false_positive_probability = 1 - (1 - alpha) ** int(n_tests)
+    false_positive_probability = _calculate_family_wise_error_rate(n_tests=n_tests, alpha=alpha)
     st.write(
-        f"Running {int(n_tests)} tests at alpha={alpha:.3f} gives "
-        f"**{100 * false_positive_probability:.2f}%** chance of at least one false positive."
+        f"Running {int(n_tests)} tests gives **{100 * false_positive_probability:.2f}%** "
+        "chance of at least one false positive."
     )
 
-    table_tests = np.array(sorted({1, 2, 5, 10, 20, 50, 100, int(n_tests)}))
-    table_rates = 1 - (1 - alpha) ** table_tests
-    table = pd.DataFrame(
-        {"Number of tests": table_tests, "At least one false positive": table_rates}
-    )
-    table["At least one false positive"] = (100 * table["At least one false positive"]).map(
-        lambda x: f"{x:.2f}%"
-    )
-    st.dataframe(table, use_container_width=True)
+    st.dataframe(_build_multiple_testing_table(alpha=alpha), use_container_width=True)
 
     corrected_alpha = alpha / int(n_tests)
     st.caption(
-        f"Bonferroni correction: use alpha/n = {corrected_alpha:.6f} "
-        "to control family-wise error rate."
+        f"Bonferroni correction: divide alpha by the number of tests. "
+        f"For {int(n_tests)} tests, use alpha={corrected_alpha:.6f}."
     )
 
 

@@ -10,39 +10,53 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.simulation import simulate_pvalue_distribution
 
 
-def test_pvalues_are_bounded_for_all_test_types():
+SIMULATION_CASES = (
+    ("T-test", 200),
+    ("Chi-square", 500),
+    ("Mann-Whitney", 200),
+)
 
-    for test_type in ("T-test", "Chi-square", "Mann-Whitney"):
+
+def test_null_effect_produces_nearly_uniform_pvalues():
+    for test_type, sample_size in SIMULATION_CASES:
         p_values = simulate_pvalue_distribution(
-            n_simulations=200,
-            sample_size=80,
+            n_simulations=2500,
+            sample_size=sample_size,
             effect_size=0.0,
             test_type=test_type,
-            random_state=42,
+            random_state=123,
         )
-        assert p_values.shape == (200,)
+        assert p_values.shape == (2500,)
         assert np.all(p_values >= 0.0)
         assert np.all(p_values <= 1.0)
+        assert 0.45 <= float(np.mean(p_values)) <= 0.55
+
+        for cutoff in (0.25, 0.50, 0.75):
+            observed_share = float(np.mean(p_values <= cutoff))
+            assert abs(observed_share - cutoff) <= 0.05
+
+        assert 0.03 <= float(np.mean(p_values < 0.05)) <= 0.08
 
 
-def test_effect_increases_rejection_rate_for_t_test():
-    null_p = simulate_pvalue_distribution(
-        n_simulations=1000,
-        sample_size=120,
-        effect_size=0.0,
-        test_type="T-test",
-        random_state=123,
-    )
-    effect_p = simulate_pvalue_distribution(
-        n_simulations=1000,
-        sample_size=120,
-        effect_size=0.35,
-        test_type="T-test",
-        random_state=123,
-    )
+def test_effect_size_pushes_pvalues_toward_zero():
+    for test_type, sample_size in SIMULATION_CASES:
+        null_p = simulate_pvalue_distribution(
+            n_simulations=2500,
+            sample_size=sample_size,
+            effect_size=0.0,
+            test_type=test_type,
+            random_state=123,
+        )
+        effect_p = simulate_pvalue_distribution(
+            n_simulations=2500,
+            sample_size=sample_size,
+            effect_size=0.2,
+            test_type=test_type,
+            random_state=123,
+        )
 
-    null_rate = float(np.mean(null_p < 0.05))
-    effect_rate = float(np.mean(effect_p < 0.05))
+        null_rate = float(np.mean(null_p < 0.05))
+        effect_rate = float(np.mean(effect_p < 0.05))
 
-    assert 0.02 <= null_rate <= 0.08
-    assert effect_rate > null_rate + 0.20
+        assert effect_rate > null_rate + 0.20
+        assert float(np.quantile(effect_p, 0.75)) < 0.25
