@@ -29,6 +29,11 @@ MDE_TYPE_RELATIVE = "Relative"
 STAT_TEST_T = "T-test"
 STAT_TEST_CHI = "Chi-square"
 STAT_TEST_MW = "Mann-Whitney"
+P_VALUE_TEST_OPTIONS = {
+    STAT_TEST_T: "t_test",
+    STAT_TEST_CHI: "chi_square",
+    STAT_TEST_MW: "mann_whitney",
+}
 
 MIN_PROBABILITY = 0.001
 MAX_PROBABILITY = 0.999
@@ -303,16 +308,16 @@ def _build_multiple_testing_table(alpha=DEFAULT_ALPHA):
     test_counts = np.array([1, 5, 10, 20, 50], dtype=int)
     table = pd.DataFrame(
         {
-            "Number of tests": test_counts,
-            "Chance of at least one false positive": [
+            "Tests": test_counts,
+            "False Positive Rate": [
                 _calculate_family_wise_error_rate(n_tests=count, alpha=alpha)
                 for count in test_counts
             ],
         }
     )
-    table["Chance of at least one false positive"] = (
-        100 * table["Chance of at least one false positive"]
-    ).map(lambda value: f"{value:.2f}%")
+    table["False Positive Rate"] = (100 * table["False Positive Rate"]).map(
+        lambda value: f"{value:.1f}%"
+    )
     return table
 
 
@@ -418,45 +423,51 @@ def render_pvalue_distribution():
     n_simulations = st.slider("Number of simulations", min_value=100, max_value=10000, value=1000, step=100)
     sample_size = st.slider("Sample size per group", min_value=50, max_value=5000, value=500, step=50)
     effect_size = st.slider("Effect size", min_value=0.0, max_value=0.5, value=0.0, step=0.01)
-    test_type = st.selectbox("Test type", [STAT_TEST_T, STAT_TEST_CHI, STAT_TEST_MW])
+    test_type = st.selectbox("Test type", list(P_VALUE_TEST_OPTIONS.keys()))
 
     if st.button("Run Simulation", type="primary"):
         p_values = simulate_pvalue_distribution(
             n_simulations=n_simulations,
-            sample_size=sample_size,
+            sample_size_per_group=sample_size,
             effect_size=effect_size,
-            test_type=test_type,
+            test_type=P_VALUE_TEST_OPTIONS[test_type],
             alpha=alpha,
         )
         _render_pvalue_histogram(p_values, alpha)
 
         significant_rate = float(np.mean(p_values < alpha))
-        st.metric("Tests significant at alpha=0.05", f"{100 * significant_rate:.2f}%")
-        st.write(f"{100 * significant_rate:.2f}% of tests were significant.")
+        mean_p_value = float(np.mean(p_values))
+        col_sig, col_mean = st.columns(2)
+        with col_sig:
+            st.metric("Tests significant", f"{100 * significant_rate:.2f}%")
+        with col_mean:
+            st.metric("Mean p-value", f"{mean_p_value:.3f}")
 
         if effect_size == 0:
             st.info(
-                f"Under the null hypothesis, expect about {100 * alpha:.1f}% false positives."
+                "Interpretation: With no true effect, p-values should look close to uniform "
+                "between 0 and 1. Around 5% below 0.05 is expected by chance."
             )
         else:
-            st.info("With real effect, p-values should concentrate near zero.")
+            st.info(
+                "Interpretation: With a real effect, p-values should skew toward 0. "
+                "More mass near 0 and a lower mean p-value indicate stronger signal."
+            )
 
     st.subheader("Multiple Testing Problem")
-    st.write("Family-wise false positive formula: `1 - (1 - 0.05)^n`")
+    st.write("`P(>=1 false positive) = 1 - (1 - alpha)^n`")
     n_tests = st.number_input("Number of independent tests", min_value=1, max_value=500, value=20, step=1)
     false_positive_probability = _calculate_family_wise_error_rate(n_tests=n_tests, alpha=alpha)
     st.write(
-        f"Running {int(n_tests)} tests gives **{100 * false_positive_probability:.2f}%** "
-        "chance of at least one false positive."
+        f"For **{int(n_tests)}** tests, `P(>=1 false positive)` is "
+        f"**{100 * false_positive_probability:.1f}%**."
     )
 
     st.dataframe(_build_multiple_testing_table(alpha=alpha), use_container_width=True)
 
     corrected_alpha = alpha / int(n_tests)
-    st.caption(
-        f"Bonferroni correction: divide alpha by the number of tests. "
-        f"For {int(n_tests)} tests, use alpha={corrected_alpha:.6f}."
-    )
+    st.write(f"Bonferroni corrected alpha: `alpha / n = {alpha:.2f} / {int(n_tests)} = {corrected_alpha:.6f}`")
+    st.warning("This is why you can't just run 20 A/B tests and cherry-pick winners.")
 
 
 PAGE_ROUTER = {
