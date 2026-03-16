@@ -1,10 +1,13 @@
 import io
+import re
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.corrections import apply_benjamini_hochberg, apply_bonferroni
+from src.paradox_detector import detect_simpsons_paradox
 from src.sample_size import (
     DEFAULT_ALPHA,
     DEFAULT_POWER,
@@ -223,12 +226,13 @@ def _render_crossover_callout(mde_range, powers):
     )
 
 
-def _load_csv_input():
-    upload = st.file_uploader("Upload CSV", type=["csv"])
+def _load_csv_input(key_prefix="csv_input", placeholder="group,value\ncontrol,10.2\ntreatment,11.1"):
+    upload = st.file_uploader("Upload CSV", type=["csv"], key=f"{key_prefix}_upload")
     csv_text = st.text_area(
         "Or paste CSV data",
         height=140,
-        placeholder="group,value\ncontrol,10.2\ntreatment,11.1",
+        placeholder=placeholder,
+        key=f"{key_prefix}_text",
     )
 
     if upload is not None:
@@ -319,6 +323,119 @@ def _build_multiple_testing_table(alpha=DEFAULT_ALPHA):
         lambda value: f"{value:.1f}%"
     )
     return table
+
+
+def _build_rate_chart(labels, values, title, color):
+    fig = go.Figure(
+        data=[
+            go.Bar(
+                x=labels,
+                y=values,
+                marker_color=color,
+                text=[f"{100 * value:.1f}%" for value in values],
+                textposition="auto",
+            )
+        ]
+    )
+    fig.update_layout(
+        title=title,
+        yaxis_title="Conversion Rate",
+        yaxis=dict(tickformat=".0%", range=[0, 1]),
+        margin=dict(t=60, b=40),
+    )
+    return fig
+
+
+def _build_subgroup_chart(subgroup_results):
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=[str(result["group"]) for result in subgroup_results],
+            y=[result["control_rate"] for result in subgroup_results],
+            name="Control",
+            marker_color="#6C7A89",
+            text=[f"{100 * result['control_rate']:.1f}%" for result in subgroup_results],
+            textposition="auto",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=[str(result["group"]) for result in subgroup_results],
+            y=[result["treatment_rate"] for result in subgroup_results],
+            name="Treatment",
+            marker_color="#2E86AB",
+            text=[f"{100 * result['treatment_rate']:.1f}%" for result in subgroup_results],
+            textposition="auto",
+        )
+    )
+    fig.update_layout(
+        title="Subgroup Breakdown",
+        barmode="group",
+        xaxis_title="Confounder Group",
+        yaxis_title="Conversion Rate",
+        yaxis=dict(tickformat=".0%", range=[0, 1]),
+        margin=dict(t=60, b=40),
+    )
+    return fig
+
+
+def _parse_pvalue_text(raw_text: str):
+    tokens = [token for token in re.split(r"[\s,]+", raw_text.strip()) if token]
+    if not tokens:
+        raise ValueError("Enter at least one p-value.")
+    return [float(token) for token in tokens]
+
+
+def _render_paradox_results(result):
+    aggregate = result["aggregate_result"]
+    subgroup_results = result["subgroup_results"]
+
+    if result["paradox_detected"]:
+        st.error(f"Simpson's paradox detected. {result['reversal_explanation']}")
+    else:
+        st.success(f"No Simpson's paradox detected. {result['reversal_explanation']}")
+
+    col_aggregate, col_subgroups = st.columns(2)
+    with col_aggregate:
+        aggregate_fig = _build_rate_chart(
+            labels=["Control", "Treatment"],
+            values=[aggregate["control_rate"], aggregate["treatment_rate"]],
+            title="Aggregate Result",
+            color=["#6C7A89", "#2E86AB"],
+        )
+        st.plotly_chart(aggregate_fig, use_container_width=True)
+        st.write(
+            f"Winner: **{aggregate['winner']}**"
+            f" | Control: **{100 * aggregate['control_rate']:.1f}%**"
+            f" | Treatment: **{100 * aggregate['treatment_rate']:.1f}%**"
+        )
+
+    with col_subgroups:
+        subgroup_fig = _build_subgroup_chart(subgroup_results)
+        st.plotly_chart(subgroup_fig, use_container_width=True)
+        st.dataframe(pd.DataFrame(subgroup_results), use_container_width=True)
+
+    st.info(
+        "Why this happens: a lurking variable can change the mix of easy and hard users across variants. "
+        "If treatment gets more of the hard-to-convert traffic, unequal group sizes can make the overall "
+        "winner reverse even when treatment wins inside the subgroups."
+    )
+
+
+def _render_corrections_table(parsed_pvalues, alpha):
+    bonferroni = apply_bonferroni(parsed_pvalues, alpha=alpha)
+    benjamini_hochberg = apply_benjamini_hochberg(parsed_pvalues, alpha=alpha)
+
+    correction_table = pd.DataFrame(
+        {
+            "original_p": [entry["original_p"] for entry in bonferroni],
+            "bonferroni_corrected_p": [entry["corrected_p"] for entry in bonferroni],
+            "bonferroni_significant": [entry["significant"] for entry in bonferroni],
+            "bh_corrected_p": [entry["corrected_p"] for entry in benjamini_hochberg],
+            "bh_significant": [entry["significant"] for entry in benjamini_hochberg],
+        }
+    )
+    st.dataframe(correction_table, use_container_width=True)
 
 
 def render_sample_size_calculator():
@@ -470,11 +587,63 @@ def render_pvalue_distribution():
     st.warning("This is why you can't just run 20 A/B tests and cherry-pick winners.")
 
 
+def render_pitfall_detection():
+    st.title("A/B Testing Intelligence Platform")
+    st.caption("Pitfall Detection")
+
+    df = _load_csv_input(
+        key_prefix="pitfall_detection",
+        placeholder="variant,converted,segment\ncontrol,1,desktop\ncontrol,0,mobile\ntreatment,1,desktop",
+    )
+
+    if df is not None:
+        st.write("Preview")
+        st.dataframe(df.head(10), use_container_width=True)
+
+        columns = list(df.columns)
+        treatment_col = st.selectbox("Treatment column", columns, key="pitfall_treatment")
+        outcome_col = st.selectbox("Outcome column", columns, key="pitfall_outcome")
+        confounder_col = st.selectbox("Confounder column", columns, key="pitfall_confounder")
+
+        if st.button("Detect Simpson's Paradox", type="primary"):
+            try:
+                result = detect_simpsons_paradox(df, treatment_col, outcome_col, confounder_col)
+                _render_paradox_results(result)
+            except Exception as error:
+                st.error(f"Could not analyze dataset: {error}")
+
+    st.divider()
+    st.subheader("Multiple Comparison Correction")
+    alpha = st.number_input(
+        "Correction alpha",
+        min_value=MIN_PROBABILITY,
+        max_value=MAX_PROBABILITY,
+        value=DEFAULT_ALPHA,
+        step=0.001,
+        format="%.3f",
+        key="pitfall_correction_alpha",
+    )
+    raw_pvalues = st.text_area(
+        "Paste p-values",
+        height=120,
+        placeholder="0.001, 0.02, 0.04, 0.18",
+        key="pitfall_pvalues",
+    )
+
+    if st.button("Apply Corrections"):
+        try:
+            parsed_pvalues = _parse_pvalue_text(raw_pvalues)
+            _render_corrections_table(parsed_pvalues, alpha)
+        except Exception as error:
+            st.error(f"Could not apply corrections: {error}")
+
+
 PAGE_ROUTER = {
     "Sample Size Calculator": render_sample_size_calculator,
     "Power Analysis": render_power_analysis,
     "Statistical Tests": render_statistical_tests,
     "P-value Distribution": render_pvalue_distribution,
+    "Pitfall Detection": render_pitfall_detection,
 }
 
 
