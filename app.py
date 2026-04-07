@@ -268,9 +268,7 @@ def _load_sequence_input(key_prefix, uploader_label, text_label, placeholder):
         key=f"{key_prefix}_text",
     )
 
-    if upload is not None:
-        return upload.getvalue().decode("utf-8")
-    return raw_text
+    return upload.getvalue().decode("utf-8") if upload is not None else raw_text
 
 
 def _run_numeric_group_test(test_type, df, alpha):
@@ -499,10 +497,12 @@ def _build_peeking_chart(pvalues, alpha):
 
 
 def _parse_pvalue_text(raw_text: str):
-    tokens = [token for token in re.split(r"[\s,]+", raw_text.strip()) if token]
-    if not tokens:
+    if tokens := [
+        token for token in re.split(r"[\s,]+", raw_text.strip()) if token
+    ]:
+        return [float(token) for token in tokens]
+    else:
         raise ValueError("Enter at least one p-value.")
-    return [float(token) for token in tokens]
 
 
 def _render_paradox_results(result):
@@ -727,31 +727,11 @@ def render_pitfall_detection(show_header=True):
     )
 
     if df is not None:
-        st.write("Preview")
-        st.dataframe(df.head(10), width="stretch")
-
-        columns = list(df.columns)
-        treatment_col = st.selectbox("Treatment column", columns, key="pitfall_treatment")
-        outcome_col = st.selectbox("Outcome column", columns, key="pitfall_outcome")
-        confounder_col = st.selectbox("Confounder column", columns, key="pitfall_confounder")
-
-        if st.button("Detect Simpson's Paradox", type="primary"):
-            try:
-                result = detect_simpsons_paradox(df, treatment_col, outcome_col, confounder_col)
-                _render_paradox_results(result)
-            except Exception as error:
-                st.error(f"Could not analyze dataset: {error}")
-
-    st.divider()
-    st.subheader("Multiple Comparison Correction")
-    alpha = st.number_input(
+        _extracted_from_render_pitfall_detection_14(df)
+    alpha = _extracted_from_render_pitfall_detection_29(
+        "Multiple Comparison Correction",
         "Correction alpha",
-        min_value=MIN_PROBABILITY,
-        max_value=MAX_PROBABILITY,
-        value=DEFAULT_ALPHA,
-        step=0.001,
-        format="%.3f",
-        key="pitfall_correction_alpha",
+        "pitfall_correction_alpha",
     )
     raw_pvalues = st.text_area(
         "Paste p-values",
@@ -767,16 +747,8 @@ def render_pitfall_detection(show_header=True):
         except Exception as error:
             st.error(f"Could not apply corrections: {error}")
 
-    st.divider()
-    st.subheader("Peeking Detector")
-    peeking_alpha = st.number_input(
-        "Peeking alpha",
-        min_value=MIN_PROBABILITY,
-        max_value=MAX_PROBABILITY,
-        value=DEFAULT_ALPHA,
-        step=0.001,
-        format="%.3f",
-        key="peeking_alpha",
+    peeking_alpha = _extracted_from_render_pitfall_detection_29(
+        "Peeking Detector", "Peeking alpha", "peeking_alpha"
     )
     peeking_raw_text = _load_sequence_input(
         key_prefix="peeking_sequence",
@@ -787,27 +759,65 @@ def render_pitfall_detection(show_header=True):
 
     if st.button("Detect Peeking"):
         try:
-            pvalues = _parse_pvalue_text(peeking_raw_text)
-            result = detect_peeking(pvalues, alpha=peeking_alpha)
-            st.plotly_chart(_build_peeking_chart(pvalues, peeking_alpha), width="stretch")
-
-            col_risk, col_first, col_final = st.columns(3)
-            with col_risk:
-                st.metric("Peeking Risk", result["peeking_risk"].title())
-            with col_first:
-                first_significant_at = result["first_significant_at"]
-                st.metric("First Significant At", "None" if first_significant_at is None else first_significant_at)
-            with col_final:
-                st.metric("Final Significant", "Yes" if result["final_significant"] else "No")
-
-            if result["peeking_risk"] == "high":
-                st.error(result["false_positive_risk_note"])
-            elif result["peeking_risk"] == "medium":
-                st.warning(result["false_positive_risk_note"])
-            else:
-                st.info(result["false_positive_risk_note"])
+            _extracted_from_render_pitfall_detection_74(peeking_raw_text, peeking_alpha)
         except Exception as error:
             st.error(f"Could not analyze p-values: {error}")
+
+
+# TODO Rename this here and in `render_pitfall_detection`
+def _extracted_from_render_pitfall_detection_74(peeking_raw_text, peeking_alpha):
+    pvalues = _parse_pvalue_text(peeking_raw_text)
+    result = detect_peeking(pvalues, alpha=peeking_alpha)
+    st.plotly_chart(_build_peeking_chart(pvalues, peeking_alpha), width="stretch")
+
+    col_risk, col_first, col_final = st.columns(3)
+    with col_risk:
+        st.metric("Peeking Risk", result["peeking_risk"].title())
+    with col_first:
+        first_significant_at = result["first_significant_at"]
+        st.metric("First Significant At", "None" if first_significant_at is None else first_significant_at)
+    with col_final:
+        st.metric("Final Significant", "Yes" if result["final_significant"] else "No")
+
+    if result["peeking_risk"] == "high":
+        st.error(result["false_positive_risk_note"])
+    elif result["peeking_risk"] == "medium":
+        st.warning(result["false_positive_risk_note"])
+    else:
+        st.info(result["false_positive_risk_note"])
+
+
+# TODO Rename this here and in `render_pitfall_detection`
+def _extracted_from_render_pitfall_detection_14(df):
+    st.write("Preview")
+    st.dataframe(df.head(10), width="stretch")
+
+    columns = list(df.columns)
+    treatment_col = st.selectbox("Treatment column", columns, key="pitfall_treatment")
+    outcome_col = st.selectbox("Outcome column", columns, key="pitfall_outcome")
+    confounder_col = st.selectbox("Confounder column", columns, key="pitfall_confounder")
+
+    if st.button("Detect Simpson's Paradox", type="primary"):
+        try:
+            result = detect_simpsons_paradox(df, treatment_col, outcome_col, confounder_col)
+            _render_paradox_results(result)
+        except Exception as error:
+            st.error(f"Could not analyze dataset: {error}")
+
+
+# TODO Rename this here and in `render_pitfall_detection`
+def _extracted_from_render_pitfall_detection_29(arg0, arg1, key):
+    st.divider()
+    st.subheader(arg0)
+    return st.number_input(
+        arg1,
+        min_value=MIN_PROBABILITY,
+        max_value=MAX_PROBABILITY,
+        value=DEFAULT_ALPHA,
+        step=0.001,
+        format="%.3f",
+        key=key,
+    )
 
 
 def render_experiment_planning():
@@ -977,8 +987,7 @@ def render_business_impact():
             recommendation=recommendation,
         )
 
-    report_markdown = st.session_state.get("executive_report_markdown")
-    if report_markdown:
+    if report_markdown := st.session_state.get("executive_report_markdown"):
         st.markdown(report_markdown)
         st.code(report_markdown, language="markdown")
 
